@@ -11,6 +11,16 @@ hop_signing_identity() {
         | head -1
 }
 
+# → for a dev build with no Developer ID: an "Apple Development" identity (free
+# with any Apple ID, made by Xcode → Settings → Accounts → Manage Certificates),
+# empty if none. Unlike an ad hoc signature it stays the same from one build to
+# the next, so macOS keeps the permissions it granted across rebuilds.
+hop_dev_signing_identity() {
+    security find-identity -v -p codesigning 2>/dev/null \
+        | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' \
+        | head -1
+}
+
 # hop_sign_app <bundle> <identity> [no-timestamp] [entitlements]
 hop_sign_app() {
     local app="$1" identity="$2" timestamp="${3:-timestamp}" entitlements="${4:-$HOP_ENTITLEMENTS}"

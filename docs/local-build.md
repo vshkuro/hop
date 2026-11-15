@@ -43,11 +43,38 @@ Hop lives in the **menu bar**, not the Dock. If it did not start:
 open "/Applications/Hop Dev.app"
 ```
 
-## 3. First launch: permissions
+## 3. Permissions, and keeping them across rebuilds
 
-The first screenshot asks for **Screen Recording**. Allow Hop Dev in
-System Settings → Privacy & Security → Screen Recording, then quit and reopen
-it. Because the build is signed ad hoc, macOS may ask again after a rebuild.
+The first screenshot asks for **Screen & System Audio Recording**. Allow Hop
+Dev in System Settings → Privacy & Security, then quit and reopen it.
+
+**Sign with a stable certificate first**, or the permission is lost on every
+rebuild. An ad hoc signature changes with each build, so macOS treats each one
+as a new app. Hop then sees the permission missing, clears its entry and asks
+again: an endless "grant, quit, ask again" loop.
+
+A free **Apple Development** certificate fixes this:
+
+1. Xcode → Settings → Accounts → add your Apple ID.
+2. Select it → *Manage Certificates…* → **+** → *Apple Development*.
+3. Check it is there: `security find-identity -v -p codesigning`
+
+`build-app.sh --dev` picks it up automatically ("signing with Apple
+Development: …"). To use a different identity, set
+`HOP_SIGN_IDENTITY="<name>"`.
+
+**If you are already stuck in the loop**, clear the old grants once:
+
+```bash
+pkill -f "Hop Dev.app/Contents/MacOS/Hop"
+tccutil reset ScreenCapture com.antonshakirov.minimo.dev
+tccutil reset Accessibility com.antonshakirov.minimo.dev
+./scripts/build-app.sh --install --dev
+```
+
+Then remove any leftover *Hop Dev* rows in System Settings → Privacy &
+Security → Screen & System Audio Recording (select, **−**), take a screenshot,
+grant access, and choose *Quit & Reopen*.
 
 ## 4. Make it your default Hop
 

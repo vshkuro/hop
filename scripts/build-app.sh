@@ -129,7 +129,11 @@ if [[ $DEV == 1 ]]; then
     plutil -replace CFBundleShortVersionString -string "$PREPARING" "$APP/Contents/Info.plist"
 fi
 source scripts/signing.sh
-IDENTITY="$(hop_signing_identity)"
+IDENTITY="${HOP_SIGN_IDENTITY:-$(hop_signing_identity)}"
+if [[ -z "$IDENTITY" && $DEV == 1 ]]; then
+    IDENTITY="$(hop_dev_signing_identity)"
+    [[ -n "$IDENTITY" ]] && echo "signing with $IDENTITY — permissions survive rebuilds."
+fi
 if [[ -z "$IDENTITY" ]]; then
     echo "⚠ no Developer ID Application certificate — signing ad hoc."
     echo "  This build is for looking at a change only: Gatekeeper rejects it,"
