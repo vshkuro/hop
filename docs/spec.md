@@ -3312,8 +3312,20 @@ drawn list of programs with their verdicts rather than the window itself.
 - Capture runs through ScreenCaptureKit in the display's BACKING pixels, so a
   retina shot is saved at full size. Hop's own windows are excluded from the
   filter: the panel never appears in the frame.
+- **An area is framed over a FROZEN screen** (2026-11-15). Pressing "area"
+  first takes every display whole, the way "screen" would, and the frame is
+  then drawn over those stills rather than over the live screen; the pick is cut
+  out of the still, not shot again. What is seen while framing is exactly what
+  comes out, and a menu, a tooltip or a hover state that dies with the first
+  click is still in the picture. Space (the window under the pointer) and `r`
+  (the last rectangle) inside the frame are cut from the same stills. A display
+  plugged in while the frame is up has no still: it is framed live and read
+  after the pick.
 - Delay (off, 3, 5, 10 seconds) is a module setting, for a menu that closes on a
-  click. The pointer is left out of the picture unless the setting asks for it.
+  click. For an area it runs BEFORE the screen is frozen — once it is, nothing
+  that happens on screen can reach the picture; for a window, the screen and a
+  repeated area it runs before the shot. The pointer is left out of the picture
+  unless the setting asks for it.
 - **The editor opens on every capture, in a window of ITS OWN.** Two shots are
   two windows, either can go to the Dock, and they are marked up side by side
   (Anton, 2026-09-08). The first is centred, the rest cascade down and right from

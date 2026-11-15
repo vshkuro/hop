@@ -8,7 +8,8 @@ import SwiftUI
 ///
 /// The frame is ours rather than the system's `screencapture -i`, which never
 /// says WHICH rectangle was chosen — without that "repeat the last area" cannot
-/// exist. SPEC: docs/spec.md — "Screenshot".
+/// exist. An area is framed over a still of the screen taken the moment the
+/// button is pressed, not over the live one. SPEC: docs/spec.md — "Screenshot".
 @MainActor
 final class CaptureController: ObservableObject {
     enum Mode {
@@ -66,34 +67,68 @@ final class CaptureController: ObservableObject {
         }
     }
 
+    /// The screens as they stood when the button was pressed, one still per
+    /// display. The frame is drawn over these and the pick is cut out of them,
+    /// so a menu, a tooltip or a hover state that dies with the first click
+    /// is still in the shot. SPEC: docs/spec.md — "Screenshot", the frozen screen.
+    private struct Still {
+        let image: CGImage
+        let scale: Double
+    }
+
+    private var stills: [UInt32: Still] = [:]
+
+    /// The delay runs BEFORE the screen is frozen: once it is, nothing that
+    /// happens on it can reach the picture.
     private func frameAnArea() {
+        let delay = delaySeconds
+        guard delay > 0 else {
+            freezeAndFrame()
+            return
+        }
+        countdown(from: delay) { [weak self] in self?.freezeAndFrame() }
+    }
+
+    private func freezeAndFrame() {
         state = .framing
+        let screens = NSScreen.screens.map { (Self.displayID(of: $0), Double($0.backingScaleFactor)) }
+        Task { [weak self] in
+            guard let self else { return }
+            let taken = await Self.stills(of: screens, showsPointer: self.showsPointer)
+            guard !taken.isEmpty else {
+                self.state = .failed
+                return
+            }
+            self.stills = taken.mapValues { Still(image: $0.image, scale: $0.scale) }
+            self.showFrame()
+        }
+    }
+
+    private func showFrame() {
         overlay.show { [weak self] screen in
+            let id = Self.displayID(of: screen)
             let host = FirstMouseHostingView(rootView: CaptureSelectionView(
                 screenSize: screen.frame.size,
                 scale: screen.backingScaleFactor,
                 lang: L10n.current,
+                backdrop: self?.stills[id]?.image,
                 onPick: { [weak self] rect in
                     guard let self else { return }
                     var picked = rect
-                    picked.displayID = Self.displayID(of: screen)
-                    self.overlay.hide()
-                    self.state = .idle
-                    self.shoot(picked)
+                    picked.displayID = id
+                    self.finishFraming(with: picked)
                 },
                 onWindowMode: { [weak self] in
-                    self?.overlay.hide()
-                    self?.state = .idle
-                    self?.takeWindowUnderPointer()
+                    guard let self else { return }
+                    self.finishFraming(with: self.windowRectUnderPointer() ?? self.wholeScreenRect())
                 },
                 onRepeat: { [weak self] in
                     guard let self, let rect = self.lastRect else { return }
-                    self.overlay.hide()
-                    self.state = .idle
-                    self.shoot(rect)
+                    self.finishFraming(with: rect)
                 },
                 onCancel: { [weak self] in
                     self?.overlay.hide()
+                    self?.stills = [:]
                     self?.state = .idle
                 }
             ))
@@ -101,20 +136,47 @@ final class CaptureController: ObservableObject {
         }
     }
 
+    /// Cut out of the frozen still. A display that has no still — plugged in
+    /// while the frame was up — is read live instead, with no second delay.
+    private func finishFraming(with rect: CaptureRect?) {
+        overlay.hide()
+        let taken = stills
+        stills = [:]
+        guard let rect else {
+            state = .idle
+            return
+        }
+        lastRect = rect
+        if let still = taken[rect.displayID], still.scale == rect.scale,
+           let image = Self.cut(still.image, to: rect) {
+            state = .idle
+            onCaptured?(image, rect)
+        } else {
+            grab(rect)
+        }
+    }
+
     private func takeWholeScreen() {
-        guard let screen = Self.screenUnderPointer() else { return }
-        shoot(CaptureRect(x: 0, y: 0,
-                          width: screen.frame.width, height: screen.frame.height,
-                          scale: screen.backingScaleFactor,
-                          displayID: Self.displayID(of: screen)))
+        guard let rect = wholeScreenRect() else { return }
+        shoot(rect)
     }
 
     private func takeWindowUnderPointer() {
+        guard let rect = windowRectUnderPointer() ?? wholeScreenRect() else { return }
+        shoot(rect)
+    }
+
+    private func wholeScreenRect() -> CaptureRect? {
+        guard let screen = Self.screenUnderPointer() else { return nil }
+        return CaptureRect(x: 0, y: 0,
+                           width: screen.frame.width, height: screen.frame.height,
+                           scale: screen.backingScaleFactor,
+                           displayID: Self.displayID(of: screen))
+    }
+
+    private func windowRectUnderPointer() -> CaptureRect? {
         guard let screen = Self.screenUnderPointer(),
-              let frame = WindowUnderPointer.frame(at: NSEvent.mouseLocation) else {
-            takeWholeScreen()
-            return
-        }
+              let frame = WindowUnderPointer.frame(at: NSEvent.mouseLocation) else { return nil }
         let local = CaptureRect(x: frame.minX - screen.frame.minX,
                                 y: screen.frame.maxY - frame.maxY,
                                 width: frame.width, height: frame.height,
@@ -122,7 +184,7 @@ final class CaptureController: ObservableObject {
                                 displayID: Self.displayID(of: screen))
         let bounds = CaptureRect(x: 0, y: 0, width: screen.frame.width, height: screen.frame.height,
                                  scale: screen.backingScaleFactor, displayID: local.displayID)
-        shoot(local.clamped(to: bounds))
+        return local.clamped(to: bounds)
     }
 
     private func shoot(_ rect: CaptureRect) {
@@ -132,26 +194,26 @@ final class CaptureController: ObservableObject {
             grab(rect)
             return
         }
-        state = .counting(delay)
-        countdown(from: delay, rect: rect)
+        countdown(from: delay) { [weak self] in self?.grab(rect) }
     }
 
-    private func countdown(from seconds: Int, rect: CaptureRect) {
+    private func countdown(from seconds: Int, then done: @escaping () -> Void) {
         guard seconds > 0 else {
             state = .idle
-            grab(rect)
+            done()
             return
         }
         state = .counting(seconds)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-            self?.countdown(from: seconds - 1, rect: rect)
+            self?.countdown(from: seconds - 1, then: done)
         }
     }
 
     private func grab(_ rect: CaptureRect) {
         Task { [weak self] in
             guard let self else { return }
-            guard let image = await Self.picture(of: rect, showsPointer: self.showsPointer) else {
+            let taken = await Self.stills(of: [(rect.displayID, rect.scale)], showsPointer: self.showsPointer)
+            guard let full = taken[rect.displayID]?.image, let image = Self.cut(full, to: rect) else {
                 self.state = .failed
                 return
             }
@@ -160,38 +222,45 @@ final class CaptureController: ObservableObject {
         }
     }
 
-    /// The whole display in its own pixels, cropped to the rectangle. Hop's own
-    /// windows are left out, so the panel never lands in the shot.
-    private static func picture(of rect: CaptureRect, showsPointer: Bool) async -> NSImage? {
+    /// Each display whole, in its own backing pixels. Hop's own windows are
+    /// left out, so the panel never lands in the shot.
+    private static func stills(
+        of displays: [(UInt32, Double)], showsPointer: Bool
+    ) async -> [UInt32: (image: CGImage, scale: Double)] {
+        let content: SCShareableContent
         do {
-            let content = try await SCShareableContent.excludingDesktopWindows(
+            content = try await SCShareableContent.excludingDesktopWindows(
                 false, onScreenWindowsOnly: true
             )
-            guard let display = content.displays.first(where: { $0.displayID == rect.displayID })
-            else { return nil }
-
-            let ours = content.windows.filter {
-                $0.owningApplication?.bundleIdentifier == Bundle.main.bundleIdentifier
-            }
+        } catch {
+            return [:]
+        }
+        let ours = content.windows.filter {
+            $0.owningApplication?.bundleIdentifier == Bundle.main.bundleIdentifier
+        }
+        var taken: [UInt32: (image: CGImage, scale: Double)] = [:]
+        for (id, scale) in displays {
+            guard let display = content.displays.first(where: { $0.displayID == id }) else { continue }
             let filter = SCContentFilter(display: display, excludingWindows: ours)
-
             let configuration = SCStreamConfiguration()
-            configuration.width = Int(Double(display.width) * rect.scale)
-            configuration.height = Int(Double(display.height) * rect.scale)
+            configuration.width = Int(Double(display.width) * scale)
+            configuration.height = Int(Double(display.height) * scale)
             configuration.showsCursor = showsPointer
             configuration.captureResolution = .best
-
-            let full = try await SCScreenshotManager.captureImage(
+            if let image = try? await SCScreenshotManager.captureImage(
                 contentFilter: filter, configuration: configuration
-            )
-
-            let crop = CGRect(x: rect.x * rect.scale, y: rect.y * rect.scale,
-                              width: Double(rect.pixelWidth), height: Double(rect.pixelHeight))
-            guard let cut = full.cropping(to: crop) else { return nil }
-            return NSImage(cgImage: cut, size: NSSize(width: rect.width, height: rect.height))
-        } catch {
-            return nil
+            ) {
+                taken[id] = (image, scale)
+            }
         }
+        return taken
+    }
+
+    private static func cut(_ full: CGImage, to rect: CaptureRect) -> NSImage? {
+        let crop = CGRect(x: rect.x * rect.scale, y: rect.y * rect.scale,
+                          width: Double(rect.pixelWidth), height: Double(rect.pixelHeight))
+        guard let cut = full.cropping(to: crop) else { return nil }
+        return NSImage(cgImage: cut, size: NSSize(width: rect.width, height: rect.height))
     }
 
     static func screenUnderPointer() -> NSScreen? {

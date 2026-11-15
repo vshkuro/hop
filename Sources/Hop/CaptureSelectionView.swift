@@ -10,6 +10,9 @@ struct CaptureSelectionView: View {
     let screenSize: CGSize
     let scale: CGFloat
     let lang: AppLanguage
+    /// The screen frozen when the button was pressed; the frame is drawn over
+    /// it, so what is seen while framing is exactly what will be cut out.
+    var backdrop: CGImage? = nil
     var onPick: (CaptureRect) -> Void
     var onWindowMode: () -> Void
     var onRepeat: () -> Void
@@ -31,6 +34,14 @@ struct CaptureSelectionView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
+            if let backdrop {
+                Image(decorative: backdrop, scale: scale)
+                    .resizable()
+                    .interpolation(.none)
+                    .frame(width: screenSize.width, height: screenSize.height)
+                    .allowsHitTesting(false)
+            }
+
             Color.black.opacity(veil)
                 .mask {
                     Rectangle()
