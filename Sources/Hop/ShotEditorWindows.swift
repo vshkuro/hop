@@ -25,7 +25,7 @@ final class ShotEditorWindows: NSObject, NSWindowDelegate {
 
     func present(image: CGImage, rect: CaptureRect, lang: AppLanguage) {
         let editor = ScreenshotEditor(base: image, rect: rect)
-        let window = NSWindow(
+        let window = ShotEditorWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false
@@ -40,6 +40,8 @@ final class ShotEditorWindows: NSObject, NSWindowDelegate {
         window.animationBehavior = .documentWindow
         window.delegate = self
         window.title = editor.fileName
+        window.onCopy = { [weak editor] in editor?.copyRequests.send() }
+        window.onEscape = { [weak window] in window?.performClose(nil) }
         titleWatchers[key] = editor.$fileName
             .sink { [weak window] name in window?.title = name }
 
@@ -150,5 +152,47 @@ final class ShotEditorWindows: NSObject, NSWindowDelegate {
             guard let window else { return }
             self?.order.removeAll { $0 === window }
         }
+    }
+}
+
+/// ⌘C copies the finished picture and escape closes the window — unless text
+/// is being edited (the file name, a caption), where both stay the text's own.
+/// SPEC: docs/spec.md — "Screenshot (capture and mark up)", ⌘C and escape.
+final class ShotEditorWindow: NSWindow {
+    var onCopy: (() -> Void)?
+    var onEscape: (() -> Void)?
+
+    /// Escape is caught here, after the app's local monitors: the crop frame's
+    /// own monitor takes it first while a crop is being chosen, so escape
+    /// drops the frame there and only closes the window once it is gone.
+    /// Closing goes through `performClose`, so marks never kept still ask.
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, event.keyCode == 53,
+           event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty,
+           !(firstResponder is NSText), let onEscape {
+            onEscape()
+            return
+        }
+        super.sendEvent(event)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if Self.isCopy(event), !(firstResponder is NSText), let onCopy {
+            onCopy()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    /// ⌘ alone with C. The key is matched by its letter, or — on a layout
+    /// whose C key types something that is not a Latin letter (Cyrillic с) —
+    /// by its place on the keyboard.
+    private static func isCopy(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        guard event.type == .keyDown, modifiers == .command else { return false }
+        let typed = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        if typed == "c" { return true }
+        let latin = typed.unicodeScalars.allSatisfy { $0.isASCII && $0.properties.isAlphabetic }
+        return event.keyCode == 8 && !(latin && !typed.isEmpty)
     }
 }

@@ -208,6 +208,9 @@ final class AppModel: ObservableObject {
         screenText.onResult = { [weak self] in self?.openScreenTextWindow?() }
         shot.onCaptured = { [weak self] image, rect in
             guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+            // SPEC: docs/spec.md — every capture is on the clipboard before the
+            // editor opens, so it can be pasted without touching the editor.
+            _ = MarkupExport.copy(cgImage)
             self?.openShotEditor?(cgImage, rect)
         }
         Self.sharedKeepAwake = keepAwake

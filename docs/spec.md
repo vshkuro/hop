@@ -3574,6 +3574,25 @@ drawn list of programs with their verdicts rather than the window itself.
   a dark or washed-out starting colour keeps its hue and has the other two
   opened up. SwiftUI's own `ColorPicker` well is not used — a rectangle among
   round swatches.
+- **Every capture is on the clipboard at once** (2026-11-15): the picture as
+  shot, before any mark, is copied the moment it is taken and the editor opens
+  over it as before. A shot that only has to be pasted needs no editor at all.
+- **⌘C in the editor copies the finished picture** — marks, crop, dressing and
+  watermark — exactly as the copy button does (2026-11-15). While text is
+  being edited (the file name, a caption) ⌘C stays the text's own copy. The
+  key is matched by its letter, and by its place on the keyboard when the
+  layout types a non-Latin letter there (Cyrillic с). `ShotEditorWindow`.
+- **Escape closes the editor window** (2026-11-15), through the same path as
+  its close button, so a shot with marks never kept still asks first. While a
+  crop is being chosen escape drops the crop frame instead, and while text is
+  being edited it stays the text's own. `ShotEditorWindow`.
+- **The selection frame takes the keyboard** when it comes up — Hop is brought
+  forward and the frame on the pointer's display made key — so escape, space
+  and `r` work even when the hotkey was pressed over another app.
+- **An explicit copy closes the window** (2026-11-15), the way a save does: the
+  button or ⌘C is the shot being done with. A failed copy keeps the window
+  open and says "not copied". The copy made at capture is not explicit and
+  closes nothing.
 - **Copy says it copied**: the glyph becomes a tick for a second. A button that
   answers nothing leaves the user pressing it again. It says so only when it
   did (found 2026-09-10): the tick used to come before the clipboard was even

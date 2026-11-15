@@ -23,6 +23,10 @@ final class ScreenshotEditor: ObservableObject {
 
     private var watches: Set<AnyCancellable> = []
 
+    /// ⌘C pressed in the window while no text is being edited: the view runs
+    /// the same copy the button does.
+    let copyRequests = PassthroughSubject<Void, Never>()
+
     let base: CGImage
     let rect: CaptureRect
 
@@ -438,13 +442,7 @@ struct ScreenshotEditorView: View {
                 .onHover { overName = $0 }
 
             Button {
-                let spot = whereCopy?() ?? .zero
-                guard editor.copyToClipboard() else {
-                    return MarkupNote.show(L10n.t(.mkCopyFailed, lang), over: spot)
-                }
-                copied = true
-                MarkupNote.show(L10n.t(.clipboardCopied, lang), over: spot)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { copied = false }
+                copyAndClose()
             } label: {
                 MarkupIcon(glyph: copied ? .done : .copy)
                     .foregroundStyle(copied ? Theme.accentGreen : Theme.textSecondary)
@@ -455,7 +453,8 @@ struct ScreenshotEditorView: View {
             }
             .buttonStyle(.plain)
             .markupAnchor { whereCopy = $0 }
-            .markupTip(L10n.t(.copyLabel, lang) + "\n" + L10n.t(.mkDoCopy, lang))
+            .markupTip(L10n.t(.copyLabel, lang) + "  ⌘C\n" + L10n.t(.mkDoCopy, lang))
+            .onReceive(editor.copyRequests) { copyAndClose() }
 
             Button {
                 let spot = whereSave?() ?? .zero
@@ -483,6 +482,19 @@ struct ScreenshotEditorView: View {
             .markupTip(L10n.t(.featureSave, lang) + "\n" + L10n.t(.mkDoSave, lang))
         }
         .frame(height: 32)
+    }
+
+    /// An explicit copy — the button or ⌘C — is the shot being done with, the
+    /// way a save is: the window closes once the clipboard has the picture.
+    /// A failed copy keeps it open and says so.
+    private func copyAndClose() {
+        let spot = whereCopy?() ?? .zero
+        guard editor.copyToClipboard() else {
+            return MarkupNote.show(L10n.t(.mkCopyFailed, lang), over: spot)
+        }
+        copied = true
+        MarkupNote.show(L10n.t(.clipboardCopied, lang), over: spot)
+        onClose()
     }
 
     private func toolbarButton(

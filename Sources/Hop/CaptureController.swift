@@ -101,6 +101,10 @@ final class CaptureController: ObservableObject {
             }
             self.stills = taken.mapValues { Still(image: $0.image, scale: $0.scale) }
             self.showFrame()
+            // The frame's keys — escape, space, r — reach it only from the key
+            // window, and a hotkey pressed over another app leaves Hop inactive.
+            NSApp.activate(ignoringOtherApps: true)
+            self.overlay.makeKey(on: Self.screenUnderPointer())
         }
     }
 
