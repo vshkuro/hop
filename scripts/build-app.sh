@@ -130,10 +130,20 @@ if [[ $DEV == 1 ]]; then
 fi
 source scripts/signing.sh
 IDENTITY="${HOP_SIGN_IDENTITY:-$(hop_signing_identity)}"
-if [[ -z "$IDENTITY" && $DEV == 1 ]]; then
+# A build installed on THIS Mac only — a dev bundle, or `--install --prod` with
+# HOP_ALLOW_PROD=1 — may be signed without a Developer ID. release.sh runs this
+# script with no flags and demands the Developer ID itself, so a release is
+# never built this way.
+LOCAL_ONLY=0
+[[ $DEV == 1 || $PROD == 1 ]] && LOCAL_ONLY=1
+if [[ -z "$IDENTITY" && $LOCAL_ONLY == 1 ]]; then
     IDENTITY="$(hop_dev_signing_identity)"
     [[ -n "$IDENTITY" ]] && echo "signing with $IDENTITY — permissions survive rebuilds."
 fi
+# The network filter is a system extension Apple only runs under the Developer
+# ID; a local build without it simply has no network module.
+STRICT_FILTER=0
+[[ $DEV == 0 && ( $PROD == 0 || "$IDENTITY" == "Developer ID Application:"* ) ]] && STRICT_FILTER=1
 if [[ -z "$IDENTITY" ]]; then
     echo "⚠ no Developer ID Application certificate — signing ad hoc."
     echo "  This build is for looking at a change only: Gatekeeper rejects it,"
@@ -146,21 +156,25 @@ fi
 # notarisation also wants a secure timestamp on the nested code of a release.
 TIMESTAMP=no-timestamp
 [[ "${HOP_NOTARIZE:-}" == "1" || $DEV == 0 ]] && TIMESTAMP=timestamp
+# a local build not signed by the Developer ID is never notarised
+[[ $STRICT_FILTER == 0 && "${HOP_NOTARIZE:-}" != "1" ]] && TIMESTAMP=no-timestamp
 APP_ENTITLEMENTS="$HOP_ENTITLEMENTS"
 if [[ "$IDENTITY" != "-" ]]; then
     FILTER_BINARY="$(dirname "$BINARY")/HopNetFilter"
     if [[ -f "$FILTER_BINARY" ]] && hop_embed_network_filter "$APP" "$FILTER_BINARY" "$IDENTITY" "$TIMESTAMP"; then
         APP_ENTITLEMENTS="$HOP_NETWORK_ENTITLEMENTS"
         echo "network filter: embedded"
-    elif [[ $DEV == 0 ]]; then
+    elif [[ $STRICT_FILTER == 1 ]]; then
         echo "❌ network filter: not embedded — a release must carry it (profiles in ~/.minimo-signing/profiles, HopNetFilter built)"
         exit 1
     else
         echo "⚠ network filter: not embedded (no profiles in ~/.minimo-signing/profiles or no binary)"
     fi
-elif [[ $DEV == 0 ]]; then
+elif [[ $STRICT_FILTER == 1 ]]; then
     echo "❌ network filter: a release needs the Developer ID identity to embed it"
     exit 1
+else
+    echo "⚠ network filter: not embedded (needs the Developer ID) — local build only"
 fi
 hop_sign_app "$WORKER_APP" "$IDENTITY" "$TIMESTAMP" scripts/HopAudioWorker.entitlements
 hop_sign_app "$APP" "$IDENTITY" "$TIMESTAMP" "$APP_ENTITLEMENTS"

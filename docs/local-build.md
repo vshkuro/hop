@@ -86,10 +86,21 @@ grant access, and choose *Quit & Reopen*.
 Hop Dev never auto-updates, so a release cannot overwrite your changes.
 
 Replacing `/Applications/Hop.app` itself is possible, but not recommended:
-`HOP_ALLOW_PROD=1 ./scripts/build-app.sh --install --prod` runs a ~25-minute
-universal release build, and you must turn auto-update off first
-(`defaults write com.antonshakirov.minimo autoUpdateEnabled -bool false`) or
-the next official release replaces it.
+
+```bash
+defaults write com.antonshakirov.minimo autoUpdateEnabled -bool false
+HOP_ALLOW_PROD=1 ./scripts/build-app.sh --install --prod
+```
+
+- It is a ~25-minute universal release build.
+- Turn auto-update off first (the `defaults` line), or the next official
+  release replaces your build.
+- Without a Developer ID it is signed with your Apple Development certificate
+  (see section 3) and has **no network module**: that system extension only
+  runs under the Developer ID.
+- Never copy `dist/Hop.app` into Applications by hand after a build that
+  stopped with ❌. That bundle is not signed, and macOS cannot keep a
+  permission for it: it asks again on every launch.
 
 ## 5. Updating after a change
 
